@@ -1,4 +1,4 @@
-\# ProjectR — Institutional-Grade Systematic Equity Strategy
+# ProjectR — Institutional-Grade Systematic Equity Strategy
 
 
 
@@ -12,19 +12,19 @@ flaws through rigorous stress testing.
 
 
 
-\*\*Status:\*\* Active development | Paper trading integration in progress (Alpaca)
+**Status:** Active development | Paper trading integration in progress (Alpaca)
 
-\*\*Backtest Period:\*\* 2003-01-01 to 2025-12-31 (5,566 trading days)
+**Backtest Period:** 2003-01-01 to 2025-12-31 (5,566 trading days)
 
-\*\*Predecessor:\*\* \[ProjectV](https://github.com/vnuthi07/ProjectV-overview)
-
-
-
-\---
+**Predecessor:** [ProjectV](https://github.com/vnuthi07/ProjectV-overview)
 
 
 
-\## Performance Summary
+---
+
+
+
+## Performance Summary
 
 
 
@@ -50,51 +50,51 @@ flaws through rigorous stress testing.
 
 
 
-\*Lower CAGR than SPY by design — the system targets risk-adjusted
+*Lower CAGR than SPY by design — the system targets risk-adjusted
 
 returns, not raw returns. Half the volatility, a fraction of the
 
-drawdown, and genuine alpha beyond factor exposure.\*
+drawdown, and genuine alpha beyond factor exposure.*
 
 
 
-\---
+---
 
 
 
-\## Dashboard
+## Dashboard
 
 
 
-\### Performance \& Annual Returns
+### Performance & Annual Returns
 
-!\[Performance Dashboard](assets/performance.png)
-
-
-
-\### Risk — Drawdown, Rolling Sharpe, Monthly Heatmap
-
-!\[Risk Dashboard](assets/risk.png)
+![Performance Dashboard](assets/performance.png)
 
 
 
-\### Regime Timeline \& Distribution
+### Risk — Drawdown, Rolling Sharpe, Monthly Heatmap
 
-!\[Regime Dashboard](assets/regimes.png)
-
-
-
-\### Portfolio Weights \& Turnover
-
-!\[Portfolio Dashboard](assets/portfolio.png)
+![Risk Dashboard](assets/risk.png)
 
 
 
-\---
+### Regime Timeline & Distribution
+
+![Regime Dashboard](assets/regimes.png)
 
 
 
-\## Architecture
+### Portfolio Weights & Turnover
+
+![Portfolio Dashboard](assets/portfolio.png)
+
+
+
+---
+
+
+
+## Architecture
 
 ```
 
@@ -128,15 +128,15 @@ typed and documented. Single command reproduces all results from scratch.
 
 
 
-\---
+---
 
 
 
-\## What Makes This Different
+## What Makes This Different
 
 
 
-\### 1. Six-State Regime Classification
+### 1. Six-State Regime Classification
 
 Markets are not simply bull or bear. ProjectR classifies into six
 
@@ -176,37 +176,37 @@ environment rather than just toggling between three aggressiveness levels.
 
 
 
-\### 2. ML Selection Layer (XGBoost + LightGBM Ensemble)
+### 2. ML Selection Layer (XGBoost + LightGBM Ensemble)
 
-\- \*\*Target:\*\* Cross-sectional rank of 21-day forward returns
+- **Target:** Cross-sectional rank of 21-day forward returns
 
 &#x20; (top tercile prediction — not return magnitude, which overfits)
 
-\- \*\*Validation:\*\* Purged k-fold cross-validation with 21-day embargo
+- **Validation:** Purged k-fold cross-validation with 21-day embargo
 
 &#x20; gap to prevent lookahead contamination from overlapping return windows
 
-\- \*\*Retraining:\*\* Quarterly on rolling 2-year window
+- **Retraining:** Quarterly on rolling 2-year window
 
-\- \*\*Graceful degradation:\*\* If ML adds nothing, system reverts to
+- **Graceful degradation:** If ML adds nothing, system reverts to
 
 &#x20; pure momentum (30% ML / 70% momentum blend)
 
-\- \*\*Current work:\*\* Soft direction gate fix expanding eligible asset
+- **Current work:** Soft direction gate fix expanding eligible asset
 
 &#x20; set from \~9 to \~15 to unlock ML's actual selection contribution
 
 
 
-\### 3. Tail Risk Hedging Overlay
+### 3. Tail Risk Hedging Overlay
 
 Three-signal composite hedge intensity score (0 to 1):
 
-\- Vol spike ratio (20d realized vol / 63d baseline)
+- Vol spike ratio (20d realized vol / 63d baseline)
 
-\- Vol-of-vol (instability in the vol regime itself)
+- Vol-of-vol (instability in the vol regime itself)
 
-\- SPY/TLT rolling correlation (breakdown = systemic stress signal)
+- SPY/TLT rolling correlation (breakdown = systemic stress signal)
 
 
 
@@ -216,7 +216,7 @@ Above hard threshold (0.70): additional 20% gross scale reduction
 
 
 
-\### 4. Regime-Conditioned Correlation Penalty
+### 4. Regime-Conditioned Correlation Penalty
 
 ProjectV applied a flat correlation penalty regardless of regime —
 
@@ -224,15 +224,15 @@ double-punishing portfolios in crisis periods when correlation is
 
 structurally unavoidable. ProjectR conditions the penalty:
 
-\- Risk-on regimes: full penalty (unusual correlation = warning)
+- Risk-on regimes: full penalty (unusual correlation = warning)
 
-\- Neutral: reduced penalty
+- Neutral: reduced penalty
 
-\- Risk-off: no penalty (crisis correlation is expected, not informative)
+- Risk-off: no penalty (crisis correlation is expected, not informative)
 
 
 
-\### 5. Full Research Validation Suite
+### 5. Full Research Validation Suite
 
 | Test | Implementation |
 
@@ -252,11 +252,11 @@ structurally unavoidable. ProjectR conditions the penalty:
 
 
 
-\---
+---
 
 
 
-\## Key Architectural Improvements Over ProjectV
+## Key Architectural Improvements Over ProjectV
 
 
 
@@ -284,11 +284,11 @@ structurally unavoidable. ProjectR conditions the penalty:
 
 
 
-\---
+---
 
 
 
-\## Factor Decomposition Results (2003-2025)
+## Factor Decomposition Results (2003-2025)
 
 
 
@@ -306,9 +306,9 @@ structurally unavoidable. ProjectR conditions the penalty:
 
 
 
-\*\*Annualized Alpha: \~6.0%\*\*
+**Annualized Alpha: \~6.0%**
 
-\*\*R-squared: \~0.35\*\* (65% of returns unexplained by these 5 factors)
+**R-squared: \~0.35** (65% of returns unexplained by these 5 factors)
 
 
 
@@ -318,11 +318,11 @@ come from genuine regime-conditioned selection, not factor loading.
 
 
 
-\---
+---
 
 
 
-\## Sample Code
+## Sample Code
 
 
 
@@ -350,63 +350,63 @@ key research and infrastructure components:
 
 
 
-\*Signal construction, regime classification parameters, and allocation
+*Signal construction, regime classification parameters, and allocation
 
-logic are private.\*
-
-
-
-\---
+logic are private.*
 
 
 
-\## Current Status \& Roadmap
+---
 
 
 
-\*\*Completed:\*\*
-
-\- ✅ Full backtest engine with modular architecture
-
-\- ✅ Six-state regime classifier (unit tested)
-
-\- ✅ XGBoost + LightGBM ML ensemble
-
-\- ✅ Tail risk hedging overlay
-
-\- ✅ Complete research suite (walk-forward, MC, factors, crisis)
-
-\- ✅ Streamlit dashboard (live metrics, regime timeline, portfolio)
-
-\- ✅ Lookahead bias validation passed (shuffled Sharpe ≈ 0.004)
+## Current Status & Roadmap
 
 
 
-\*\*In Progress:\*\*
+**Completed:**
 
-\- 🔄 Soft direction gate fix — expanding ML eligible set
+- ✅ Full backtest engine with modular architecture
 
-\- 🔄 Paper trading integration via Alpaca API
+- ✅ Six-state regime classifier (unit tested)
 
-\- 🔄 Academic methodology document
+- ✅ XGBoost + LightGBM ML ensemble
 
+- ✅ Tail risk hedging overlay
 
+- ✅ Complete research suite (walk-forward, MC, factors, crisis)
 
-\*\*Target Metrics Before Live Deployment:\*\*
+- ✅ Streamlit dashboard (live metrics, regime timeline, portfolio)
 
-\- OOS walk-forward Sharpe ≥ 0.85
-
-\- In-sample Sharpe ≥ 1.0
-
-\- Max Drawdown ≤ 18%
+- ✅ Lookahead bias validation passed (shuffled Sharpe ≈ 0.004)
 
 
 
-\---
+**In Progress:**
+
+- 🔄 Soft direction gate fix — expanding ML eligible set
+
+- 🔄 Paper trading integration via Alpaca API
+
+- 🔄 Academic methodology document
 
 
 
-\*Full methodology and code available to verified quant researchers
+**Target Metrics Before Live Deployment:**
 
-and recruiters upon request.\*
+- OOS walk-forward Sharpe ≥ 0.85
+
+- In-sample Sharpe ≥ 1.0
+
+- Max Drawdown ≤ 18%
+
+
+
+---
+
+
+
+*Full methodology and code available to verified quant researchers
+
+and recruiters upon request.*
 
