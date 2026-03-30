@@ -32,7 +32,7 @@ flaws through rigorous stress testing.
 
 |---|---|---|
 
-| CAGR | 8.4% | \~10.5% |
+| CAGR | 9.2% | \~10.5% |
 
 | Sharpe Ratio | 0.91 | \~0.55 |
 
