@@ -1,179 +1,107 @@
-"""
-crisis_analysis.py — Crisis Period Performance Analysis
-========================================================
-Analyzes how ProjectR performed during historically significant
-market stress events.
-
-This is the analysis every quant interviewer asks about:
-    "How did you do in 2008? In COVID? In the 2022 rate shock?"
-
-A strategy that looks great in-sample but collapses in crises is
-not a strategy — it's a bull market survivor. ProjectR's regime
-classifier is specifically designed to go defensive before drawdowns
-compound. This module measures whether it actually did.
-
-Key questions answered per crisis period:
-    1. Did the strategy protect capital vs SPY?
-    2. How quickly did the regime classifier go defensive?
-       (regime_response_lag_days — lower is better)
-    3. What was average gross exposure during the stress period?
-    4. What was the dominant regime detected?
-    5. How does max drawdown compare to benchmark?
-
-Crisis periods covered:
-    GFC peak:         Sep 2008 – Mar 2009  (Lehman, peak drawdown)
-    GFC full:         Oct 2007 – Jun 2009  (full bear market)
-    Euro crisis:      Jul 2011 – Oct 2011  (sovereign debt contagion)
-    China shock:      Aug 2015 – Sep 2015  (flash crash)
-    COVID crash:      Feb 19 – Mar 23 2020 (fastest bear market ever)
-    COVID recovery:   Mar 23 – Aug 2020    (V-shaped recovery)
-    Rate shock 2022:  Jan – Dec 2022       (worst bonds/stocks year in decades)
-    SVB crisis:       Mar – May 2023       (regional banking contagion)
-"""
-
-from __future__ import annotations
-
-import numpy as np
 import pandas as pd
+import numpy as np
+from dataclasses import dataclass
 
-# Canonical crisis periods — dates are inclusive market-session bounds
-CRISIS_PERIODS: dict[str, tuple[str, str]] = {
-    "GFC_peak":        ("2008-09-01", "2009-03-31"),
-    "GFC_full":        ("2007-10-01", "2009-06-30"),
-    "Euro_crisis":     ("2011-07-01", "2011-10-31"),
-    "China_shock":     ("2015-08-01", "2015-09-30"),
-    "COVID_crash":     ("2020-02-19", "2020-03-23"),
-    "COVID_recovery":  ("2020-03-23", "2020-08-31"),
-    "Rate_shock_2022": ("2022-01-01", "2022-12-31"),
-    "SVB_crisis":      ("2023-03-01", "2023-05-31"),
-}
 
-# Regime labels that constitute a "defensive" state
-DEFENSIVE_REGIMES: set[str] = {
-    "BEARISH_HIGHVOL",
-    "BEARISH_LOWVOL",
-    "CHOPPY_HIGHVOL",
+CRISIS_PERIODS = {
+    "GFC": ("2008-09-01", "2009-03-31"),
+    "US Debt Downgrade": ("2011-07-01", "2011-10-31"),
+    "China/Oil Selloff": ("2015-08-01", "2016-02-29"),
+    "Q4 2018 Selloff": ("2018-10-01", "2018-12-31"),
+    "COVID Crash": ("2020-02-01", "2020-03-31"),
+    "2022 Bear Market": ("2022-01-01", "2022-10-31"),
 }
 
 
-def crisis_performance_report(
-    strategy_equity: pd.Series,
+@dataclass
+class CrisisPeriodResult:
+    name: str
+    start: str
+    end: str
+    strategy_return: float
+    benchmark_return: float
+    outperformance: float
+    strategy_max_dd: float
+    benchmark_max_dd: float
+    strategy_sharpe: float
+    trading_days: int
+
+
+def analyze_crisis_period(
     strategy_returns: pd.Series,
     benchmark_returns: pd.Series,
-    regime_series: pd.Series | None = None,
-    weights_df: pd.DataFrame | None = None,
-    crisis_periods: dict[str, tuple[str, str]] | None = None,
-) -> pd.DataFrame:
-    """
-    Generate per-crisis performance comparison vs benchmark.
+    name: str,
+    start: str,
+    end: str,
+) -> CrisisPeriodResult:
+    s = strategy_returns.loc[start:end]
+    b = benchmark_returns.loc[start:end]
 
-    Args:
-        strategy_equity:   Cumulative equity curve
-        strategy_returns:  Daily strategy returns
-        benchmark_returns: Daily benchmark (SPY) returns
-        regime_series:     Daily regime labels (optional)
-                           Used to compute response lag and dominant regime
-        weights_df:        Daily portfolio weights DataFrame (optional)
-                           Used to compute average gross exposure
-        crisis_periods:    Custom crisis dict (default: CRISIS_PERIODS)
+    def total_return(r):
+        return float((1 + r).prod() - 1)
 
-    Returns:
-        pd.DataFrame with one row per crisis period, columns:
-            period_name, start, end, n_days,
-            strategy_return, benchmark_return, excess_return,
-            strategy_maxdd, benchmark_maxdd, dd_reduction,
-            dominant_regime, avg_gross_exposure,
-            regime_response_lag_days
+    def period_max_dd(r):
+        cum = (1 + r).cumprod()
+        return float(((cum - cum.cummax()) / cum.cummax()).min())
 
-    Interpretation guide:
-        excess_return > 0:      Strategy outperformed benchmark
-        dd_reduction > 0:       Strategy had shallower drawdown
-        regime_response_lag:    Days until defensive regime triggered
-                                (<5 days is excellent, >20 days is slow)
-        avg_gross_exposure:     How much the system de-risked
-                                (<0.7 in bear market = meaningful defense)
-    """
-    if crisis_periods is None:
-        crisis_periods = CRISIS_PERIODS
+    def period_sharpe(r):
+        if r.std() == 0:
+            return 0.0
+        return float(r.mean() / r.std() * np.sqrt(252))
 
-    # Build benchmark equity curve
-    bench_eq = (1.0 + benchmark_returns).cumprod()
-    bench_eq = bench_eq / bench_eq.iloc[0]
+    strat_ret = total_return(s)
+    bench_ret = total_return(b)
 
-    rows = []
+    return CrisisPeriodResult(
+        name=name,
+        start=start,
+        end=end,
+        strategy_return=strat_ret,
+        benchmark_return=bench_ret,
+        outperformance=strat_ret - bench_ret,
+        strategy_max_dd=period_max_dd(s),
+        benchmark_max_dd=period_max_dd(b),
+        strategy_sharpe=period_sharpe(s),
+        trading_days=len(s),
+    )
 
-    for name, (start, end) in crisis_periods.items():
-        # Check data coverage
-        mask = (strategy_equity.index >= start) & (strategy_equity.index <= end)
-        if mask.sum() < 5:
+
+def run_crisis_analysis(
+    strategy_returns: pd.Series,
+    benchmark_returns: pd.Series,
+    periods: dict = None,
+) -> list[CrisisPeriodResult]:
+    if periods is None:
+        periods = CRISIS_PERIODS
+
+    results = []
+    for name, (start, end) in periods.items():
+        try:
+            result = analyze_crisis_period(
+                strategy_returns, benchmark_returns, name, start, end
+            )
+            results.append(result)
+        except Exception:
             continue
 
-        # Strategy metrics
-        strat_sub = strategy_equity.loc[start:end]
-        strat_ret = float(strat_sub.iloc[-1] / strat_sub.iloc[0] - 1.0) \
-            if len(strat_sub) >= 2 else np.nan
+    return results
 
-        rolling_max = strat_sub.cummax()
-        strat_dd = float(((strat_sub / rolling_max) - 1.0).min()) \
-            if len(strat_sub) >= 2 else np.nan
 
-        # Benchmark metrics
-        bench_sub = bench_eq.loc[start:end]
-        bench_ret = float(bench_sub.iloc[-1] / bench_sub.iloc[0] - 1.0) \
-            if len(bench_sub) >= 2 else np.nan
+def print_crisis_summary(results: list[CrisisPeriodResult]) -> None:
+    print(f"{'Crisis Period Analysis'}")
+    print(f"{'─' * 75}")
+    print(
+        f"{'Period':<25} {'Strategy':>10} {'SPY':>10} "
+        f"{'Alpha':>10} {'Strat DD':>10} {'Days':>6}"
+    )
+    print(f"{'─' * 75}")
 
-        bench_roll_max = bench_sub.cummax()
-        bench_dd = float(((bench_sub / bench_roll_max) - 1.0).min()) \
-            if len(bench_sub) >= 2 else np.nan
+    for r in results:
+        print(
+            f"{r.name:<25} {r.strategy_return:>10.1%} {r.benchmark_return:>10.1%} "
+            f"{r.outperformance:>+10.1%} {r.strategy_max_dd:>10.1%} {r.trading_days:>6}"
+        )
 
-        # Derived metrics
-        excess = strat_ret - bench_ret \
-            if not (np.isnan(strat_ret) or np.isnan(bench_ret)) else np.nan
-        dd_red = strat_dd - bench_dd \
-            if not (np.isnan(strat_dd) or np.isnan(bench_dd)) else np.nan
-
-        # Regime analysis (if available)
-        dom_regime = "N/A"
-        avg_exp    = np.nan
-        lag        = np.nan
-
-        if regime_series is not None:
-            reg_sub = regime_series.loc[start:end]
-            if not reg_sub.empty:
-                dom_regime = str(reg_sub.mode().iloc[0])
-
-            # Response lag: days from crisis start to first defensive regime
-            reg_from_start = regime_series.loc[start:]
-            lag = np.nan
-            for i, label in enumerate(reg_from_start):
-                if label in DEFENSIVE_REGIMES:
-                    lag = float(i)
-                    break
-
-        if weights_df is not None:
-            w_sub = weights_df.loc[start:end]
-            if not w_sub.empty:
-                avg_exp = float(w_sub.abs().sum(axis=1).mean())
-
-        rows.append({
-            "period_name":              name,
-            "start":                    start,
-            "end":                      end,
-            "n_days":                   int(mask.sum()),
-            "strategy_return":          strat_ret,
-            "benchmark_return":         bench_ret,
-            "excess_return":            excess,
-            "strategy_maxdd":           strat_dd,
-            "benchmark_maxdd":          bench_dd,
-            "dd_reduction":             dd_red,
-            "dominant_regime":          dom_regime,
-            "avg_gross_exposure":       avg_exp,
-            "regime_response_lag_days": lag,
-        })
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-
-    df["_sort"] = pd.to_datetime(df["start"])
-    return df.sort_values("_sort").drop(columns="_sort").reset_index(drop=True)
+    avg_alpha = np.mean([r.outperformance for r in results])
+    print(f"{'─' * 75}")
+    print(f"{'Average outperformance':<25} {avg_alpha:>+10.1%}")

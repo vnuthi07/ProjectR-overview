@@ -1,170 +1,112 @@
-"""
-factor_decomposition.py — OLS Factor Exposure Analysis
-=======================================================
-Decomposes strategy returns into systematic factor exposures via
-Ordinary Least Squares regression.
-
-The key question this answers:
-    Is ProjectR generating genuine alpha, or just levered SPY beta?
-
-A strategy with high Sharpe but 0.95 beta to SPY and near-zero alpha
-isn't generating skill — it's taking on equity risk. Factor decomposition
-makes this transparent.
-
-Factors used in ProjectR's analysis:
-    SPY  — US equity market beta
-    QQQ  — Growth/tech factor
-    IEF  — Duration / interest rate factor
-    GLD  — Inflation / safe haven factor
-    UUP  — Dollar factor (important for commodity and EM positions)
-
-Two analyses:
-    1. Full-period OLS: single beta and alpha estimate across entire backtest
-    2. Rolling OLS:     how factor exposures evolve over time
-       This is critical — a strategy that maintains consistent factor
-       exposures is more trustworthy than one whose exposures drift.
-
-ProjectR's factor decomposition finding (2003-2025):
-    SPY beta: ~0.25 (low market exposure by design)
-    Annualized alpha: ~6.0% (genuine edge beyond factor exposure)
-    R-squared: ~0.35 (65% of returns unexplained by these factors)
-    This confirms the strategy is not just leveraged SPY beta.
-"""
-
-from __future__ import annotations
-
 import numpy as np
 import pandas as pd
-from scipy import stats
+from dataclasses import dataclass
+import statsmodels.api as sm
 
-_TRADING_DAYS = 252
+
+FACTOR_TICKERS = {
+    "SPY": "US Equity Market",
+    "QQQ": "Growth/Tech",
+    "IEF": "Intermediate Duration",
+    "GLD": "Gold/Inflation Hedge",
+    "UUP": "US Dollar",
+}
 
 
-def factor_decomposition(
+@dataclass
+class FactorDecompositionResult:
+    alpha_annualized: float
+    alpha_tstat: float
+    alpha_pvalue: float
+    r_squared: float
+    betas: dict[str, float]
+    beta_tstats: dict[str, float]
+    beta_pvalues: dict[str, float]
+    residual_sharpe: float
+    information_ratio: float
+
+
+def run_factor_decomposition(
     strategy_returns: pd.Series,
-    factor_prices: pd.DataFrame,
-    rolling_window: int = 126,
-) -> dict:
-    """
-    OLS decomposition of strategy returns into factor exposures.
+    factor_returns: pd.DataFrame,
+    periods_per_year: int = 252,
+) -> FactorDecompositionResult:
+    aligned = pd.concat([strategy_returns, factor_returns], axis=1).dropna()
+    y = aligned.iloc[:, 0]
+    X = sm.add_constant(aligned.iloc[:, 1:])
 
-    Args:
-        strategy_returns: Daily strategy return series
-        factor_prices:    DataFrame of factor price series (SPY, QQQ, IEF, etc.)
-                          Converted to returns internally
-        rolling_window:   Days for rolling regression (default 126 = 6 months)
+    model = sm.OLS(y, X).fit()
 
-    Returns:
-        dict containing:
-            full_period:       {factor: {beta, t_stat, p_value}}
-            annualized_alpha:  Jensen's alpha, annualized
-            r_squared:         Fraction of variance explained by factors
-            rolling_betas:     DataFrame (date x factor) of time-varying exposures
-            information_ratio: Alpha / tracking error vs first factor
+    alpha_daily = model.params["const"]
+    alpha_annualized = (1 + alpha_daily) ** periods_per_year - 1
 
-    Interpretation guide:
-        annualized_alpha > 0:  Genuine outperformance beyond factor exposure
-        r_squared < 0.5:       Returns not well-explained by these factors
-                               (could be good — suggests genuine diversification)
-        rolling_betas stable:  Consistent factor exposure over time (trustworthy)
-        rolling_betas drifting: Strategy characteristics changing (investigate)
-        t_stat > 2.0 on alpha: Alpha is statistically significant
-    """
-    factor_returns = factor_prices.pct_change().dropna(how="all")
+    factor_names = [c for c in aligned.columns[1:]]
+    betas = {name: float(model.params[name]) for name in factor_names}
+    beta_tstats = {name: float(model.tvalues[name]) for name in factor_names}
+    beta_pvalues = {name: float(model.pvalues[name]) for name in factor_names}
 
-    # Align on common dates
-    common = strategy_returns.index.intersection(factor_returns.index)
-    y     = strategy_returns.loc[common].values
-    X_raw = factor_returns.loc[common]
+    residuals = model.resid
+    residual_sharpe = float(
+        residuals.mean() / residuals.std() * np.sqrt(periods_per_year)
+    )
 
-    # Drop factors with > 20% missing data
-    X_raw = X_raw.dropna(axis=1, thresh=int(0.8 * len(X_raw)))
-    X_raw = X_raw.fillna(0.0)
+    factor_component = model.fittedvalues - alpha_daily
+    ir = float(
+        alpha_daily / residuals.std() * np.sqrt(periods_per_year)
+    ) if residuals.std() > 0 else 0.0
 
-    factor_names = list(X_raw.columns)
-    X = X_raw.values
-    n, k = X.shape
+    return FactorDecompositionResult(
+        alpha_annualized=alpha_annualized,
+        alpha_tstat=float(model.tvalues["const"]),
+        alpha_pvalue=float(model.pvalues["const"]),
+        r_squared=float(model.rsquared),
+        betas=betas,
+        beta_tstats=beta_tstats,
+        beta_pvalues=beta_pvalues,
+        residual_sharpe=residual_sharpe,
+        information_ratio=ir,
+    )
 
-    # ── Full-period OLS ───────────────────────────────────────────────────────
-    X_const = np.column_stack([np.ones(n), X])
 
-    try:
-        beta_hat, _, _, _ = np.linalg.lstsq(X_const, y, rcond=None)
-    except Exception:
-        return {}
+def rolling_factor_betas(
+    strategy_returns: pd.Series,
+    factor_returns: pd.DataFrame,
+    window: int = 252,
+) -> pd.DataFrame:
+    aligned = pd.concat([strategy_returns, factor_returns], axis=1).dropna()
+    factor_names = aligned.columns[1:].tolist()
+    results = []
 
-    alpha_daily = beta_hat[0]
-    betas       = beta_hat[1:]
-
-    # Standard errors via analytical formula
-    y_pred   = X_const @ beta_hat
-    resid    = y - y_pred
-    sse      = float(resid @ resid)
-    df_resid = n - k - 1
-    mse      = sse / df_resid if df_resid > 0 else np.nan
-
-    try:
-        XtX_inv = np.linalg.inv(X_const.T @ X_const)
-        se = np.sqrt(np.diag(mse * XtX_inv)) if mse else np.zeros(k + 1)
-    except np.linalg.LinAlgError:
-        se = np.zeros(k + 1)
-
-    t_stats = beta_hat / (se + 1e-15)
-    p_vals  = 2 * (1 - stats.t.cdf(np.abs(t_stats), df=max(1, df_resid)))
-
-    # R-squared
-    ss_tot    = float(((y - y.mean()) ** 2).sum())
-    r_squared = float(1.0 - sse / ss_tot) if ss_tot > 0 else 0.0
-
-    # Per-factor results
-    full_period: dict = {}
-    for i, fname in enumerate(factor_names):
-        full_period[fname] = {
-            "beta":    float(betas[i]),
-            "t_stat":  float(t_stats[i + 1]),
-            "p_value": float(p_vals[i + 1]),
-        }
-
-    annualized_alpha = float(alpha_daily * _TRADING_DAYS)
-
-    # Information ratio vs first factor
-    if factor_names:
-        first_factor_rets = factor_returns.loc[common, factor_names[0]]
-        active_returns    = strategy_returns.loc[common] - first_factor_rets
-        te = float(active_returns.std() * np.sqrt(_TRADING_DAYS))
-        ir = annualized_alpha / te if te > 0 else np.nan
-    else:
-        te = ir = np.nan
-
-    # ── Rolling regression ────────────────────────────────────────────────────
-    rolling_betas_dict: dict[str, list] = {f: [] for f in factor_names}
-    rolling_dates: list = []
-    dates = list(X_raw.index)
-
-    for end_i in range(rolling_window, len(dates) + 1):
-        start_i = end_i - rolling_window
-        y_roll  = y[start_i:end_i]
-        X_roll  = np.column_stack([np.ones(rolling_window), X[start_i:end_i]])
-
+    for i in range(window, len(aligned)):
+        window_data = aligned.iloc[i - window : i]
+        y = window_data.iloc[:, 0]
+        X = sm.add_constant(window_data.iloc[:, 1:])
         try:
-            b_roll, _, _, _ = np.linalg.lstsq(X_roll, y_roll, rcond=None)
-            for j, fname in enumerate(factor_names):
-                rolling_betas_dict[fname].append(float(b_roll[j + 1]))
+            model = sm.OLS(y, X).fit()
+            row = {"date": aligned.index[i]}
+            row.update({name: model.params[name] for name in factor_names})
+            row["alpha"] = model.params["const"] * 252
+            row["r_squared"] = model.rsquared
+            results.append(row)
         except Exception:
-            for fname in factor_names:
-                rolling_betas_dict[fname].append(np.nan)
+            continue
 
-        rolling_dates.append(dates[end_i - 1])
+    return pd.DataFrame(results).set_index("date")
 
-    rolling_betas = pd.DataFrame(rolling_betas_dict, index=rolling_dates)
 
-    return {
-        "full_period":       full_period,
-        "annualized_alpha":  annualized_alpha,
-        "r_squared":         r_squared,
-        "rolling_betas":     rolling_betas,
-        "information_ratio": ir,
-        "tracking_error":    te,
-        "alpha_t_stat":      float(t_stats[0]),
-        "alpha_p_value":     float(p_vals[0]),
-    }
+def print_factor_decomposition(result: FactorDecompositionResult) -> None:
+    print("Factor Decomposition Results")
+    print(f"{'─' * 50}")
+    print(f"Annualized Alpha : {result.alpha_annualized:>8.2%}  (t={result.alpha_tstat:.2f}, p={result.alpha_pvalue:.3f})")
+    print(f"R-Squared        : {result.r_squared:>8.3f}")
+    print(f"Residual Sharpe  : {result.residual_sharpe:>8.3f}")
+    print(f"Info Ratio       : {result.information_ratio:>8.3f}")
+    print()
+    print(f"{'Factor':<15} {'Beta':>8} {'t-stat':>8} {'p-value':>8}")
+    print(f"{'─' * 50}")
+    for name in result.betas:
+        print(
+            f"{name:<15} {result.betas[name]:>8.3f} "
+            f"{result.beta_tstats[name]:>8.2f} "
+            f"{result.beta_pvalues[name]:>8.3f}"
+        )
